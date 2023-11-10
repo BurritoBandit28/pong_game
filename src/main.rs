@@ -99,6 +99,9 @@ pub struct MaxVelocity(f32);
 #[derive(Component)]
 pub struct BounceSound1;
 
+#[derive(Component)] 
+pub struct PlayerBounces(u32);
+
 #[derive(Component)]
 pub struct BounceSound2;
 
@@ -184,6 +187,7 @@ fn start_pong(mut commands: Commands, asset_server: Res<AssetServer>) {
         DirectionX::Left,
         BallFact(2.0),
         Bounces(0),
+        PlayerBounces(0)
     ));
     commands.spawn((AudioBundle {
         source: asset_server.load("sounds/totally_not_stolen_portal_slash_half-life2_sound_effects/energy_sing_loop4.ogg"),
@@ -243,24 +247,25 @@ pub struct NumberMarker;
 
 
 
-pub fn get_ball_fac(bounces: &mut u32, bloom: &mut BloomSettings) -> f32 {
+pub fn get_ball_fac(bounces: &mut u32, bloom: &mut BloomSettings, pb : &u32) -> f32 {
     let mut val = 2.0;
 
     // this *bounces > 14 is to make the condition true.... at 16 bounces. only made it work at 17 bounces... for some reason. I.. Idk why
-    if *bounces > 14 {
+    if *pb > 14 {
         val = 12.0
     }
-    if (7..15).contains(&bounces.to_owned()) {
+    if (7..15).contains(&pb.to_owned()) {
         val = 8.0;
     }
-    if (4..7).contains(&bounces.to_owned()) {
+    if (4..7).contains(&pb.to_owned()) {
         val = 6.3;
     }
-    if (1..4).contains(&bounces.to_owned()) {
+    if (1..4).contains(&pb.to_owned()) {
         val = 4.5;
     }
     *bounces += 1;
     bloom.intensity = 0.3;
+    //println!("{}", &val);
     return val;
 }
 
@@ -286,6 +291,7 @@ fn do_ball_movement(
             &mut DirectionX,
             &mut BallFact,
             &mut Bounces,
+            &mut PlayerBounces
         ),
         (With<Ball>, Without<Bat>),
     >,
@@ -305,7 +311,7 @@ fn do_ball_movement(
         let mut bloom = camera.get_single_mut().unwrap();
         let num = rand::thread_rng().gen_range(0..2);
         let mut bounces_b: u32;
-        for (mut trans, mut velocity, mut diry, mut dirx, mut fact, mut bounces) in &mut ball {
+        for (mut trans, mut velocity, mut diry, mut dirx, mut fact, mut bounces, mut pbounces) in &mut ball {
             bounces_b = bounces.0;
             if bloom.intensity > 0.077 {
                 bloom.intensity -= 0.004
@@ -325,19 +331,19 @@ fn do_ball_movement(
             velocity.0.y *= fact.0;
             if trans.translation.y < -400.0 {
                 *diry = DirectionY::Up;
-                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom, &pbounces.0);
             } else if trans.translation.y > 400.0 {
                 *diry = DirectionY::Down;
-                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom, &pbounces.0);
             }
             if trans.translation.x > 700.0 {
                 *dirx = DirectionX::Left;
-                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom, &pbounces.0);
             } else if trans.translation.x < -800.0 {
                 
                 let last_high : u32 = read_high_score().unwrap().parse().unwrap();
             
-                write_high_score(&bounces.0);
+                write_high_score(&pbounces.0);
                 let font = asset_server.load("fonts/Trigram-vmLDM.ttf");
                 let text_allignment = TextAlignment::Center;
             let text_style = TextStyle {
@@ -395,7 +401,7 @@ fn do_ball_movement(
                 
             );
             //println!("{}", read_high_score().unwrap());
-            if bounces.0 > last_high {
+            if pbounces.0 > last_high {
                 commands.spawn(
                     Text2dBundle {
                         text : Text::from_section("NEW RECORD", text_style3)
@@ -425,7 +431,8 @@ fn do_ball_movement(
                         .contains(&trans.translation.y)
                 {
                     *dirx = DirectionX::Right;
-                    fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+                    pbounces.0+=1;
+                    fact.0 = get_ball_fac(&mut bounces.0, &mut bloom, &pbounces.0);
                 }
             }
             match *dirx {
@@ -482,8 +489,8 @@ fn do_ball_movement(
                 color : Color::WHITE,
             };
             for (mut text, letter_component) in &mut score {
-                let mut str : String = bounces.0.to_string();
-                if bounces.0 < 10 {
+                let mut str : String = pbounces.0.to_string();
+                if pbounces.0 < 10 {
                     str = {
                         let mut trs = "0".to_string();
                         trs.push_str(&str);
