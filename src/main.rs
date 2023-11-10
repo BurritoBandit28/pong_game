@@ -1,14 +1,18 @@
-use std::default;
-
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::Path;
 use bevy::audio::PlaybackMode;
 use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::ecs::query::WorldQuery;
 use bevy::prelude::*;
 use bevy::window::{PresentMode, PrimaryWindow, WindowTheme};
-use bevy::*;
 use rand::Rng;
-use anyhow::Result;
-use bevy::ecs::query::QuerySingleError;
+use std::fs::OpenOptions;
+use std::io::BufReader;
+use anyhow::{Result, Ok};
+use std::io::Read;
+
 
 fn main() {
     App::new()
@@ -64,6 +68,12 @@ pub enum DirectionX {
     Right,
 }
 
+#[derive(Component, PartialEq)]
+pub enum LetterComponent {
+    Left,
+    Right
+}
+
 // I dont even know.... it wasnt working so i gave both the bats names and now they work
 #[derive(Component)]
 pub struct Name(String);
@@ -93,12 +103,17 @@ pub struct BounceSound1;
 pub struct BounceSound2;
 
 #[derive(Component)]
+pub struct Middle;
+
+#[derive(Component)]
 pub struct DeathSound;
 
 #[derive(Component)]
 pub struct Velocity(Vec2);
 
 fn start_pong(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let font = asset_server.load("fonts/Trigram-vmLDM.ttf");
+
     commands.spawn((
         Camera2dBundle {
             camera: Camera {
@@ -117,7 +132,7 @@ fn start_pong(mut commands: Commands, asset_server: Res<AssetServer>) {
             composite_mode: BloomCompositeMode::EnergyConserving,
         }, // 3. Enable bloom for the camera
     ));
-    commands.spawn(SpriteBundle {
+    commands.spawn((SpriteBundle {
         texture: asset_server.load("game_sprites/middle.png"),
         transform: Transform::from_scale(Vec3 {
             x: 3.0,
@@ -125,7 +140,7 @@ fn start_pong(mut commands: Commands, asset_server: Res<AssetServer>) {
             z: 1.0,
         }),
         ..default()
-    });
+    }, Middle));
     commands.spawn((
         SpriteBundle {
             texture: asset_server.load("game_sprites/bat.png"),
@@ -181,15 +196,52 @@ fn start_pong(mut commands: Commands, asset_server: Res<AssetServer>) {
         }
 
     },
-    Loop, 
-)
+    Loop));
 
+    let text_style = TextStyle {
+        font : font.clone(),
+        font_size : 200.0,
+        color : Color::WHITE,
+    };
+    let text_allignment = TextAlignment::Center;
 
+    commands.spawn((Text2dBundle {
+        text : Text::from_section("0", text_style.clone())
+        .with_alignment(text_allignment),
+        text_anchor: Default::default(),
+        text_2d_bounds: Default::default(),
+        transform : Transform::from_xyz(-200.0, 250.0, 0.0),
+        global_transform: Default::default(),
+        visibility: Default::default(),
+        inherited_visibility: Default::default(),
+        view_visibility: Default::default(),
+        text_layout_info: Default::default(),
+    },
+    LetterComponent::Left,
+    NumberMarker));
+    commands.spawn((Text2dBundle {
+        text : Text::from_section("0", text_style.clone())
+        .with_alignment(text_allignment),
+        text_anchor: Default::default(),
+        text_2d_bounds: Default::default(),
+        transform : Transform::from_xyz(200.0, 250.0, 0.0),
+        global_transform: Default::default(),
+        visibility: Default::default(),
+        inherited_visibility: Default::default(),
+        view_visibility: Default::default(),
+        text_layout_info: Default::default(),
+    },
+    LetterComponent::Right,
+    NumberMarker
+));
 
-);
+    
 
-    //commands.get_entity(looping).
 }
+#[derive(Component)]
+pub struct NumberMarker;
+
+
 
 pub fn get_ball_fac(bounces: &mut u32, bloom: &mut BloomSettings) -> f32 {
     let mut val = 2.0;
@@ -215,7 +267,7 @@ pub fn get_ball_fac(bounces: &mut u32, bloom: &mut BloomSettings) -> f32 {
 #[derive(PartialEq)]
 pub enum GameState {
     Over,
-    Continue
+    Continue,
 }
 #[derive(Resource)]
 pub struct GameOver(GameState);
@@ -240,44 +292,70 @@ fn do_ball_movement(
     mut player_bat: Query<&mut Transform, (With<Bat>, Without<Ball>, With<Player>)>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    music_controller : Query<&AudioSink, With<Loop>>,
-    mut game_over : ResMut<GameOver>
+    music_controller: Query<&AudioSink, With<Loop>>,
+    mut game_over: ResMut<GameOver>,
+    mut score : Query<
+    (
+        &mut Text, &mut LetterComponent
+    )
+    , With<NumberMarker>>,
+    mut middle : Query<&mut Transform, (With<Middle>, Without<Ball>, Without<Bat>)>
 ) {
     if game_over.0 == GameState::Continue {
-    let mut bloom = camera.get_single_mut().unwrap();
-    let num = rand::thread_rng().gen_range(0..2);
-    let mut bounces_b : u32;
-    for (mut trans, mut velocity, mut diry, mut dirx, mut fact, mut bounces) in &mut ball {
-        bounces_b = bounces.0;
-        if bloom.intensity > 0.077 {
-            bloom.intensity -= 0.004
-        }
+        let mut bloom = camera.get_single_mut().unwrap();
+        let num = rand::thread_rng().gen_range(0..2);
+        let mut bounces_b: u32;
+        for (mut trans, mut velocity, mut diry, mut dirx, mut fact, mut bounces) in &mut ball {
+            bounces_b = bounces.0;
+            if bloom.intensity > 0.077 {
+                bloom.intensity -= 0.004
+            }
 
-        if velocity.0.x + velocity.0.y == 0.0 {
-            velocity.0.x = 20.0;
-            velocity.0.y = 20.0;
-        }
+            if velocity.0.x + velocity.0.y == 0.0 {
+                velocity.0.x = rand::thread_rng().gen_range(15..21) as f32;
+                
+                velocity.0.y = {rand::thread_rng().gen_range(15..21) as f32};
+            }
 
-        //velocity.0.x += trans.translation.x;
-        //velocity.0.y += trans.translation.y;
+            //velocity.0.x += trans.translation.x;
+            //velocity.0.y += trans.translation.y;
 
-        velocity.0 = velocity.0.normalize();
-        velocity.0.x *= fact.0;
-        velocity.0.y *= fact.0;
-        if trans.translation.y < -400.0 {
-            *diry = DirectionY::Up;
-            fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
-        } else if trans.translation.y > 400.0 {
-            *diry = DirectionY::Down;
-            fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
-        }
-        if trans.translation.x > 700.0 {
-            *dirx = DirectionX::Left;
-            fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
-        } else if trans.translation.x < -800.0 {
-            if let Ok(sink) = music_controller.get_single() {
-                sink.pause();
-                commands.spawn(AudioBundle {
+            velocity.0 = velocity.0.normalize();
+            velocity.0.x *= fact.0;
+            velocity.0.y *= fact.0;
+            if trans.translation.y < -400.0 {
+                *diry = DirectionY::Up;
+                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+            } else if trans.translation.y > 400.0 {
+                *diry = DirectionY::Down;
+                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+            }
+            if trans.translation.x > 700.0 {
+                *dirx = DirectionX::Left;
+                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+            } else if trans.translation.x < -800.0 {
+                
+                let last_high : u32 = read_high_score().unwrap().parse().unwrap();
+            
+                write_high_score(&bounces.0);
+                let font = asset_server.load("fonts/Trigram-vmLDM.ttf");
+                let text_allignment = TextAlignment::Center;
+            let text_style = TextStyle {
+                font : font.clone(),
+                font_size : 200.0,
+                color : Color::WHITE,
+            };let text_style2 = TextStyle {
+                font : font.clone(),
+                font_size : 100.0,
+                color : Color::WHITE,
+            };let text_style3 = TextStyle {
+                font : font.clone(),
+                font_size : 75.0,
+                color : Color::YELLOW,
+            };
+                if let std::result::Result::Ok(sink) = music_controller.get_single() {
+                    sink.pause();
+                    commands.spawn((AudioBundle {
                     source: asset_server.load(
                         "sounds/totally_not_stolen_portal_slash_half-life2_sound_effects/energy_sing_explosion2.ogg",
                     ),
@@ -288,42 +366,90 @@ fn do_ball_movement(
                         paused: false,
                         spatial: false,
                     },
-                });
-                game_over.0 = GameState::Over
+                },
+                Text2dBundle {
+                    text : Text::from_section("GAME\nOVER", text_style)
+                .with_alignment(text_allignment),
+                text_anchor: Default::default(),
+                text_2d_bounds: Default::default(),
+                transform : Transform::from_xyz(0.0, 0.0, 0.0),
+                global_transform: Default::default(),
+                visibility: Default::default(),
+                inherited_visibility: Default::default(),
+                view_visibility: Default::default(),
+                text_layout_info: Default::default(),
+                }));
+                commands.spawn(
+                Text2dBundle {
+                    text : Text::from_section(std::format!("HIGH SCORE : {}", read_high_score().unwrap()), text_style2)
+                .with_alignment(text_allignment),
+                text_anchor: Default::default(),
+                text_2d_bounds: Default::default(),
+                transform : Transform::from_xyz(0.0, -250.0, 0.0),
+                global_transform: Default::default(),
+                visibility: Default::default(),
+                inherited_visibility: Default::default(),
+                view_visibility: Default::default(),
+                text_layout_info: Default::default(),
+                }
+                
+            );
+            //println!("{}", read_high_score().unwrap());
+            if bounces.0 > last_high {
+                commands.spawn(
+                    Text2dBundle {
+                        text : Text::from_section("NEW RECORD", text_style3)
+                    .with_alignment(text_allignment),
+                    text_anchor: Default::default(),
+                    text_2d_bounds: Default::default(),
+                    transform : Transform::from_xyz(0.0, -320.0, 0.0),
+                    global_transform: Default::default(),
+                    visibility: Default::default(),
+                    inherited_visibility: Default::default(),
+                    view_visibility: Default::default(),
+                    text_layout_info: Default::default(),
+                    }  
+                );
             }
-        }
-        for transb in &mut player_bat {
-            if (-712.0..-699.0).contains(&trans.translation.x)
-                && *dirx == DirectionX::Left
-                && (transb.translation.y - 43.0..transb.translation.y + 42.0)
-                    .contains(&trans.translation.y)
-            {
-                *dirx = DirectionX::Right;
-                fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+            
+            
+            let mid = &mut middle.single_mut();
+            mid.scale = Vec3::new(0.0, 0.0, 0.0);
+                    game_over.0 = GameState::Over
+                }
             }
-        }
-        match *dirx {
-            DirectionX::Left => {
-                trans.translation.x -= velocity.0.x;
+            for transb in &mut player_bat {
+                if (-712.0..-699.0).contains(&trans.translation.x)
+                    && *dirx == DirectionX::Left
+                    && (transb.translation.y - 43.0..transb.translation.y + 42.0)
+                        .contains(&trans.translation.y)
+                {
+                    *dirx = DirectionX::Right;
+                    fact.0 = get_ball_fac(&mut bounces.0, &mut bloom);
+                }
             }
-            DirectionX::Right => {
-                trans.translation.x += velocity.0.x;
+            match *dirx {
+                DirectionX::Left => {
+                    trans.translation.x -= velocity.0.x;
+                }
+                DirectionX::Right => {
+                    trans.translation.x += velocity.0.x;
+                }
             }
-        }
-        match *diry {
-            DirectionY::Down => {
-                trans.translation.y -= velocity.0.y;
+            match *diry {
+                DirectionY::Down => {
+                    trans.translation.y -= velocity.0.y;
+                }
+                DirectionY::Up => {
+                    trans.translation.y += velocity.0.y;
+                }
             }
-            DirectionY::Up => {
-                trans.translation.y += velocity.0.y;
-            }
-        }
 
-        // bad approach but icba anymore
+            // bad approach but icba anymore
 
-        if bounces_b < bounces.0 {
-            if num > 0 {
-                commands.spawn(AudioBundle {
+            if bounces_b < bounces.0 {
+                if num > 0 {
+                    commands.spawn(AudioBundle {
                     source: asset_server.load(
                         "sounds/totally_not_stolen_portal_slash_half-life2_sound_effects/energy_bounce1.ogg",
                     ),
@@ -335,8 +461,8 @@ fn do_ball_movement(
                         spatial: false,
                     },
                 });
-            }else {
-                commands.spawn(AudioBundle {
+                } else {
+                    commands.spawn(AudioBundle {
                     source: asset_server.load(
                         "sounds/totally_not_stolen_portal_slash_half-life2_sound_effects/energy_bounce2.ogg",
                     ),
@@ -348,12 +474,76 @@ fn do_ball_movement(
                         spatial: false,
                     },
                 });
+                }
+                let font = asset_server.load("fonts/Trigram-vmLDM.ttf");
+            let text_style = TextStyle {
+                font : font.clone(),
+                font_size : 200.0,
+                color : Color::WHITE,
+            };
+            for (mut text, letter_component) in &mut score {
+                let mut str : String = bounces.0.to_string();
+                if bounces.0 < 10 {
+                    str = {
+                        let mut trs = "0".to_string();
+                        trs.push_str(&str);
+                        trs
+                    }
+                }
+                match *letter_component {
+                    LetterComponent::Left => {
+                        *text = Text::from_section(str.chars().nth(0).unwrap().to_string(), text_style.clone())
+                    }
+                    LetterComponent::Right => {
+                        *text = Text::from_section(str.chars().nth(1).unwrap().to_string(), text_style.clone())
+                    }
+                }
             }
-        }
+            }
+            // Im fetching assets every frame this is really bad
+            
 
-        //println!("{}    {}", trans.translation.x, velocity.0.x)
+            //println!("{}    {}", trans.translation.x, velocity.0.x)
+        }
     }
 }
+
+fn write_high_score(score : &u32) {
+    let str : String;
+    if Path::new("./scores/scores.txt").exists() {
+        str = String::from(std::format!(",\n{}",score.to_string()))
+    }
+    else {
+        fs::create_dir("./scores/").expect("FUCK FOLDERS AAAAH");
+        File::create("./scores/scores.txt").expect("FUCK Files AAAAH");
+        str = String::from(std::format!("{}",score.to_string()))
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("./scores/scores.txt")
+        .unwrap();
+    unsafe { file.write_all(str.as_ref()) };
+}
+
+fn read_high_score() -> Result<String, anyhow::Error> {
+    let mut score : String = String::new();
+    if !Path::new("./scores/scores.txt").exists() {
+        return Ok("0".to_string())
+    }
+    let mut file = File::open("./scores/scores.txt");
+    let mut buf_reader = BufReader::new(file.unwrap());
+    buf_reader.read_to_string(&mut score);
+    score.replace("\n", "");
+    let bits = score.split(',');
+    let mut buts = bits.collect::<Vec<&str>>();
+    let mut bims : Vec<u32> = vec![];
+    for x in buts {
+        bims.push(x.trim().to_string().parse().unwrap())
+    }
+    bims.sort();
+    score = bims[bims.len()-1].to_string().trim().to_string();
+    return Ok(score);
 }
 
 fn do_bot_movement(
